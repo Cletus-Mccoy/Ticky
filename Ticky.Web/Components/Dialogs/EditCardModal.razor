@@ -4,6 +4,7 @@
 @inject IJSRuntime _js
 @inject NavigationManager _navigationManager
 @inject ILogger<EditCardModal> _logger
+@inject CardService _cardService
 
 <PriorityModal @ref=_priorityModal UpdateCard="UpdateCard" />
 <LabelModal @ref=_labelModal UpdateCard="UpdateCard" />
@@ -544,22 +545,7 @@
         if (_card is null)
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var card = await GetCard(db, _card.Id);
-
-        if (card is null)
-            return;
-
-        card.Name = e.Value?.ToString() ?? string.Empty;
-        card.Activities.Add(new Activity
-        {
-            ActivityType = ActivityType.TitleChanged,
-            Text = "<b>changed</b> the title",
-            UserId = _user.Id,
-            CardId = card.Id,
-        });
-
-        await db.SaveChangesAsync();
+        await _cardService.UpdateAsync(new Actor(_user.Id), _card.Id, name: e.Value?.ToString() ?? string.Empty);
 
         await UpdateCard();
     }
@@ -574,22 +560,7 @@
         if (_card is null)
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var card = await GetCard(db, _card.Id);
-
-        if (card is null)
-            return;
-
-        card.Description = e.Value?.ToString() ?? string.Empty;
-        card.Activities.Add(new Activity
-        {
-            ActivityType = ActivityType.DescriptionChanged,
-            Text = "<b>changed</b> the description",
-            UserId = _user.Id,
-            CardId = card.Id,
-        });
-
-        await db.SaveChangesAsync();
+        await _cardService.UpdateAsync(new Actor(_user.Id), _card.Id, description: e.Value?.ToString() ?? string.Empty);
 
         await UpdateCard();
     }
@@ -637,28 +608,10 @@
         if (_card is null)
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var card = await GetCard(db, _card.Id);
+        var result = await _cardService.AddCommentAsync(new Actor(_user.Id), _card.Id, _commentText);
 
-        if (card is null)
+        if (!result.Succeeded)
             return;
-
-        card.Comments.Add(new Comment
-            {
-                Text = _commentText,
-                CreatedAt = DateTime.Now,
-                CreatedById = _user.Id,
-                CardId = _card.Id
-            });
-        card.Activities.Add(new Activity
-            {
-                ActivityType = ActivityType.CommentPosted,
-                Text = "<b>posted</b> a comment",
-                UserId = _user.Id,
-                CardId = card.Id,
-            });
-
-        await db.SaveChangesAsync();
 
         _commentText = string.Empty;
         await UpdateCard();
@@ -738,29 +691,30 @@
         await UpdateCard();
     }
 
-    private async Task MoveToPreviousList()
+    private Task MoveToPreviousList() => MoveByColumnOffset(-1);
+
+    private async Task MoveByColumnOffset(int offset)
     {
         if (_card is null)
             return;
 
         using var db = _dbContextFactory.CreateDbContext();
-        var card = await GetCard(db, _card.Id);
 
-        if (card is null)
+        var targetColumnId = await db.Columns
+            .Where(x => x.BoardId == _card.Column.BoardId && x.Index == _card.Column.Index + offset)
+            .Select(x => (int?)x.Id)
+            .FirstOrDefaultAsync();
+
+        if (targetColumnId is null)
             return;
 
-        var targetColumn = await db.Columns
-            .Include(x => x.Cards)
-            .Where(x => x.BoardId.Equals(card.Column.BoardId))
-            .FirstOrDefaultAsync(x => x.Index.Equals(card.Column.Index - 1));
+        var result = await _cardService.MoveAsync(new Actor(_user.Id), _card.Id, targetColumnId.Value);
 
-        if (targetColumn is null)
+        if (!result.Succeeded)
+        {
+            _mainLayout.RunNotification(new Notification(result.Message!, NotificationType.Fail));
             return;
-
-        card.Activities.Add(Activity.CardMoved(card.Id, _user.Id, card.Column, targetColumn));
-        card.Column = targetColumn;
-
-        await db.SaveChangesAsync();
+        }
 
         await UpdateCard();
     }
@@ -825,32 +779,7 @@
         await UpdateCard();
     }
 
-    private async Task MoveToNextList()
-    {
-        if (_card is null)
-            return;
-
-        using var db = _dbContextFactory.CreateDbContext();
-        var card = await GetCard(db, _card.Id);
-
-        if (card is null)
-            return;
-
-        var targetColumn = await db.Columns
-            .Include(x => x.Cards)
-            .Where(x => x.BoardId.Equals(card.Column.BoardId))
-            .FirstOrDefaultAsync(x => x.Index.Equals(card.Column.Index + 1));
-
-        if (targetColumn is null)
-            return;
-
-        card.Activities.Add(Activity.CardMoved(card.Id, _user.Id, card.Column, targetColumn));
-        card.Column = targetColumn;
-
-        await db.SaveChangesAsync();
-
-        await UpdateCard();
-    }
+    private Task MoveToNextList() => MoveByColumnOffset(1);
 
     private async Task UpdateCard()
     {

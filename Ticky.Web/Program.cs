@@ -120,6 +120,8 @@ builder.Services.AddScoped<CodeService>();
 builder.Services.AddDevityMailing<EmailService>(mailKitOptions!);
 builder.Services.AddScoped<AvatarService>();
 builder.Services.AddScoped<CardNumberingService>();
+builder.Services.AddScoped<CardService>();
+builder.Services.AddScoped<BoardService>();
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<TrelloImportService>();
 builder.Services.AddSingleton<InformationService>();

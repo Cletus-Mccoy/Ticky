@@ -11,3 +11,4 @@ global using Ticky.Base.Enums;
 global using Ticky.Internal.Data;
 global using Ticky.Internal.Helpers;
 global using Ticky.Internal.Services;
+global using Ticky.Base.DTOs.Api;

@@ -1,6 +1,6 @@
 @inject IDbContextFactory<DataContext> _dbContextFactory
 @inject IJSRuntime _js
-@inject CardNumberingService _cardNumberingService
+@inject CardService _cardService
 @inject ILogger<ColumnView> _logger
 @inherits NotifiableBase
 
@@ -295,51 +295,14 @@
 
         try
         {
-            using var db = _dbContextFactory.CreateDbContext();
+            var result = await _cardService.MoveAsync(new Actor(User.Id), movedCardId, newColumnId, beforeCardId: targetCardId);
 
-            var targetColumns = await db.Columns
-                .Where(x => x.Id.Equals(oldColumnId) || x.Id.Equals(newColumnId))
-                .Include(x => x.Cards)
-                .ToListAsync();
+            if (result.Error == ServiceError.ColumnFull)
+                throw new IndexOutOfRangeException(result.Message);
 
-            var dbOldColumn = targetColumns.First(x => x.Id.Equals(oldColumnId));
-            var dbNewColumn = targetColumns.First(x => x.Id.Equals(newColumnId));
+            if (!result.Succeeded)
+                throw new InvalidOperationException(result.Message);
 
-            if (dbNewColumn.MaxCards != 0 && dbNewColumn.Cards.Count + 1 > dbNewColumn.MaxCards)
-            {
-                throw new IndexOutOfRangeException("Target column is full.");
-            }
-
-            var dbMovedCard = dbOldColumn.Cards.OrderBy(x => x.Index).First(x => x.Id.Equals(movedCardId));
-            dbOldColumn.Cards.Remove(dbMovedCard);
-            IndexHelper.FixIndices(dbOldColumn.Cards);
-
-            int dbTargetIndex = dbNewColumn.Cards.Any() ? dbNewColumn.Cards.Max(x => x.Index) + 1 : 0;
-
-            if (targetCardId is not null)
-            {
-                var dbTargetCard = dbNewColumn.Cards.FirstOrDefault(x => x.Id.Equals(targetCardId));
-
-                if (dbTargetCard is not null)
-                {
-                    dbTargetIndex = dbTargetCard.Index;
-                    foreach (var card in dbNewColumn.Cards.OrderByDescending(x => x.Index))
-                    {
-                        if (card.Index >= dbTargetCard.Index)
-                            card.Index++;
-                    }
-                }
-            }
-
-            dbNewColumn.Cards.Add(dbMovedCard);
-            dbMovedCard.Index = dbTargetIndex;
-            dbMovedCard.ColumnId = newColumnId;
-
-            IndexHelper.FixIndices(dbNewColumn.Cards);
-
-            db.Activities.Add(Activity.CardMoved(movedCardId, User.Id, dbOldColumn, dbNewColumn));
-
-            await db.SaveChangesAsync();
             await OnUpdate.InvokeAsync();
         }
         catch (Exception ex)
@@ -428,48 +391,18 @@
         if (_createTaskModel is null || string.IsNullOrWhiteSpace(_createTaskModel.Text))
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
+        var result = await _cardService.CreateAsync(new Actor(User.Id), columnId, _createTaskModel.Text);
 
-        var column = await db.Columns
-            .Include(x => x.Cards)
-            .FirstOrDefaultAsync(x => x.Id.Equals(columnId));
+        if (result.Error == ServiceError.ColumnFull)
+        {
+            MainLayout.RunNotification(new("The card could not be created in this column due to it being already full.", NotificationType.Fail));
+            return;
+        }
 
-        if (column is null)
+        if (!result.Succeeded)
             return;
 
-        int newIndex = 0;
-
-        switch (Column.NewCardPlacement)
-        {
-            case CardPlacement.Top:
-                {
-                    foreach (var card in column.Cards)
-                        card.Index++;
-                    break;
-                }
-            default:
-                newIndex = IndexHelper.GetNextIndex(column.Cards);
-                break;
-        }
-
-        var newCard = new Card
-        {
-            Name = _createTaskModel.Text,
-            ColumnId = columnId,
-            Index = newIndex,
-            CreatedAt = DateTime.Now,
-            Number = await _cardNumberingService.GetNextNumberAsync(Board.Id),
-            CreatedById = User.Id
-        };
-
-        if (User.AutomaticAssign)
-        {
-            var targetUser = await db.Users.FirstAsync(x => x.Id.Equals(User.Id));
-            newCard.Assignees.Add(targetUser);
-        }
-
-        column.Cards.Add(newCard);
-        await db.SaveChangesAsync();
+        var newCard = result.Value!;
         await OnUpdate.InvokeAsync();
 
         _createTaskModel = new();
