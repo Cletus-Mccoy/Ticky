@@ -81,6 +81,10 @@
                             {
                                 <i class="fa fa-check text-add-outline" title="Selected"></i>
                             }
+                            else if (Model.ExcludedLabelIds.Contains(label.Id))
+                            {
+                                <i class="fa fa-xmark" title="Excluded"></i>
+                            }
                         </div>
                     }
                 }
@@ -111,9 +115,15 @@
     private async Task ToggleLabelFilter(int labelId)
     {
         if (Model.LabelIds.Contains(labelId))
+        {
             Model.LabelIds.Remove(labelId);
+            Model.ExcludedLabelIds.Add(labelId);
+        }
+        else if (Model.ExcludedLabelIds.Contains(labelId))
+            Model.ExcludedLabelIds.Remove(labelId);
         else
             Model.LabelIds.Add(labelId);
+
         await SearchUpdated.InvokeAsync();
     }
 

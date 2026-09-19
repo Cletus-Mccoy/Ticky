@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Devity.Mailing;
 using Devity.NETCore.MailKit.Infrastructure.Internal;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.AuthenticatedEncryption;
@@ -56,6 +57,7 @@ builder
 
 builder.Services.ConfigureApplicationCookie(options =>
 {
+    options.Cookie.Name = Constants.Cookies.Authentication;
     options.ExpireTimeSpan = TimeSpan.FromDays(365);
     options.SlidingExpiration = true;
     options.LoginPath = "/auth/login";
@@ -64,6 +66,11 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
+});
+
+builder.Services.Configure<AntiforgeryOptions>(options =>
+{
+    options.Cookie.Name = Constants.Cookies.Antiforgery;
 });
 
 builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>

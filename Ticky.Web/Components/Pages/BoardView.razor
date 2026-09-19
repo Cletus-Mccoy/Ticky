@@ -8,6 +8,7 @@
 @inject ILogger<BoardView> _logger
 @inject IHttpContextAccessor _httpContextAccessor
 @inherits NotifiableBase
+@implements IAsyncDisposable
 
 @if (_board is not null)
 {
@@ -209,6 +210,7 @@
 
     private HubConnection? _hubConnection;
     private HashSet<string> _expandedSections = new();
+    private bool _isDisposed;
 
     protected override void OnParametersSet()
     {
@@ -234,7 +236,7 @@
         _hubConnection = new HubConnectionBuilder()
             .WithUrl(uri, options =>
             {
-				var cookieName = ".AspNetCore.Identity.Application";
+                var cookieName = Constants.Cookies.Authentication;
                 var cookieValue = httpContext?.Request?.Cookies[cookieName];
 
                 if (!string.IsNullOrEmpty(cookieValue))
@@ -267,6 +269,10 @@
             var boardPreferences = await _protectedLocalStorage.GetAsync<BoardPreferencesModel>(Constants.StorageKeys.BoardPreferences);
             _preferences = (boardPreferences.Success ? boardPreferences.Value : new()) ?? new();
         }
+        catch (JSDisconnectedException)
+        {
+            _preferences = new();
+        }
         catch (CryptographicException)
         {
             _preferences = new();
@@ -276,6 +282,10 @@
         {
             var filterPreferences = await _protectedLocalStorage.GetAsync<FilterCardsModel>(FILTERS_SCOPED_KEY);
             _filterModel = (filterPreferences.Success ? filterPreferences.Value : new()) ?? new();
+        }
+        catch (JSDisconnectedException)
+        {
+            _filterModel = new();
         }
         catch(CryptographicException)
         {
@@ -329,6 +339,9 @@
             await _hubConnection.SendAsync(nameof(UpdateHub.SubscribeBoard), Id);
         } catch(Exception ex)
         {
+            if (_isDisposed)
+                return;
+
             _logger.LogError(ex, "Failed to start hub connection or subscribe to board {BoardId}", Id);
             MainLayout.RunNotification(new("Real-time updates unavailable. Please refresh the page.", NotificationType.Fail));
         }
@@ -341,6 +354,9 @@
         try
         {
             await _protectedLocalStorage.SetAsync(Constants.StorageKeys.BoardPreferences, _preferences);
+        }
+        catch (JSDisconnectedException)
+        {
         }
         catch (Exception ex)
         {
@@ -493,11 +509,17 @@
 
         await LoadCardsAsync();
 
+        if (_isDisposed)
+            return;
+
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadCardsAsync()
     {
+        if (_isDisposed)
+            return;
+
         ArgumentNullException.ThrowIfNull(_board);
 
         using var db = _dbContextFactory.CreateDbContext();
@@ -533,7 +555,13 @@
         if (_filterModel.LabelIds.Count > 0)
             queryableCards = queryableCards.Where(card => card.Labels.Any(x => _filterModel.LabelIds.Contains(x.Id)));
 
+        if (_filterModel.ExcludedLabelIds.Count > 0)
+            queryableCards = queryableCards.Where(card => !card.Labels.Any(x => _filterModel.ExcludedLabelIds.Contains(x.Id)));
+
         _cards = await queryableCards.ToListAsync();
+
+        if (_isDisposed)
+            return;
 
         await InvokeAsync(StateHasChanged);
 
@@ -541,9 +569,29 @@
         {
             await _protectedLocalStorage.SetAsync(FILTERS_SCOPED_KEY, _filterModel);
         }
+        catch (JSDisconnectedException)
+        {
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to save filter preferences.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+
+        if (_hubConnection is null)
+            return;
+
+        try
+        {
+            await _hubConnection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to dispose board hub connection.");
         }
     }
 
@@ -591,4 +639,3 @@
 
     private bool IsExpanded(string id) => _expandedSections.Contains(id);
 }
-
