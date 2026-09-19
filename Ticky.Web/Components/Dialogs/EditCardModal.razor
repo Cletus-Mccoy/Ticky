@@ -951,50 +951,7 @@
         if (_card is null)
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var targetLink = await db.CardLinks
-            .Include(x => x.CardOne)
-                .ThenInclude(x => x.Activities)
-            .Include(x => x.CardOne)
-                .ThenInclude(x => x.Column)
-                    .ThenInclude(x => x.Board)
-            .Include(x => x.CardTwo)
-                .ThenInclude(x => x.Column)
-                    .ThenInclude(x => x.Board)
-            .Include(x => x.CardTwo)
-                .ThenInclude(x => x.Activities)
-            .FirstOrDefaultAsync(x => x.Id.Equals(link.Id));
-
-        if (targetLink is null)
-            return;
-
-        var oppositeCategory = Constants.LINK_TYPE_PAIRS.ContainsKey(targetLink.Category) ? Constants.LINK_TYPE_PAIRS[targetLink.Category] : Constants.LINK_TYPE_PAIRS.First(x => x.Value.Equals(targetLink.Category)).Key;
-        var oppositeTarget = await db.CardLinks.FirstOrDefaultAsync(x => x.CardTwoId.Equals(targetLink.CardOneId));
-
-        if (oppositeTarget is not null)
-        {
-            db.CardLinks.Remove(oppositeTarget);
-
-            targetLink.CardTwo.Activities.Add(new Activity
-                {
-                    ActivityType = ActivityType.LinkRemoved,
-                    Text = $"<b>deleted</b> a linked issue <b>{targetLink.CardOne.Column.Board.Code}-{targetLink.CardOne.Number}</b> with <b>{targetLink.Category}</b> relationship",
-                    UserId = _user.Id,
-                    CardId = targetLink.CardTwoId,
-                });
-        }
-
-        db.CardLinks.Remove(targetLink);
-
-        targetLink.CardOne.Activities.Add(new Activity
-            {
-                ActivityType = ActivityType.LinkRemoved,
-                Text = $"<b>deleted</b> a linked issue <b>{targetLink.CardTwo.Column.Board.Code}-{targetLink.CardTwo.Number}</b> with <b>{targetLink.Category}</b> relationship",
-                UserId = _user.Id,
-                CardId = targetLink.CardOneId,
-            });
-
-        await db.SaveChangesAsync();
+        await _cardService.RemoveLinkAsync(new Actor(_user.Id), link.CardOneId, link.CardTwoId);
         await UpdateCard();
     }
 

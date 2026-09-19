@@ -41,6 +41,7 @@ public class BoardService
                     .OrderBy(c => c.Index)
                     .Select(c => new ColumnDto(c.Id, c.Name, c.Index, c.Finished, c.MaxCards, c.Cards.Count))
                     .ToList(),
+                Labels = x.Labels.OrderBy(l => l.Name).Select(l => new LabelDto(l.Id, l.Name)).ToList(),
             })
             .FirstOrDefaultAsync();
 
@@ -66,7 +67,70 @@ public class BoardService
             ))
             .ToListAsync();
 
-        return new BoardDto(board.Id, board.Code, board.Name, board.Description, board.Columns, cards);
+        return new BoardDto(board.Id, board.Code, board.Name, board.Description, board.Columns, board.Labels, cards);
+    }
+
+    /// <summary>
+    /// Labels defined on the board. Null if the board is not accessible.
+    /// </summary>
+    public async Task<List<LabelDto>?> GetLabelsAsync(Actor actor, int boardId)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+
+        if (!await db.AccessibleBoards(actor).AnyAsync(x => x.Id == boardId))
+            return null;
+
+        return await db.Labels
+            .Where(x => x.BoardId == boardId)
+            .OrderBy(x => x.Name)
+            .Select(x => new LabelDto(x.Id, x.Name))
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Adds a column at the end of the board. Like the UI, only board admins may do this.
+    /// </summary>
+    public async Task<ServiceResult<Column>> CreateColumnAsync(
+        Actor actor,
+        int boardId,
+        string name,
+        int maxCards = 0,
+        bool finished = false,
+        CardPlacement newCardPlacement = CardPlacement.Bottom
+    )
+    {
+        name = name.Trim();
+
+        if (string.IsNullOrWhiteSpace(name))
+            return ServiceResult<Column>.Fail(ServiceError.Invalid, "Column name must not be empty.");
+
+        if (maxCards < 0)
+            return ServiceResult<Column>.Fail(ServiceError.Invalid, "Max cards must be 0 (unlimited) or more.");
+
+        using var db = _dbContextFactory.CreateDbContext();
+
+        if (!await db.AccessibleBoards(actor).AnyAsync(x => x.Id == boardId))
+            return ServiceResult<Column>.Fail(ServiceError.NotFound, $"Board {boardId} not found.");
+
+        if (!await db.AdministeredBoards(actor).AnyAsync(x => x.Id == boardId))
+            return ServiceResult<Column>.Fail(ServiceError.Forbidden, "Only board admins can add columns.");
+
+        var columns = await db.Columns.Where(x => x.BoardId == boardId).ToListAsync();
+
+        var column = new Column
+        {
+            Name = name,
+            BoardId = boardId,
+            Index = columns.GetNextIndex(),
+            MaxCards = maxCards,
+            Finished = finished,
+            NewCardPlacement = newCardPlacement,
+        };
+
+        db.Columns.Add(column);
+        await db.SaveChangesAsync();
+
+        return ServiceResult<Column>.Ok(column);
     }
 
     /// <summary>

@@ -8,6 +8,7 @@ public static class ServiceResultExtensions
             statusCode: result.Error switch
             {
                 ServiceError.NotFound => StatusCodes.Status404NotFound,
+                ServiceError.Forbidden => StatusCodes.Status403Forbidden,
                 ServiceError.ColumnFull => StatusCodes.Status409Conflict,
                 _ => StatusCodes.Status400BadRequest,
             }

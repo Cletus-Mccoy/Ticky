@@ -1,5 +1,5 @@
 @inherits AbstractModal
-@inject IDbContextFactory<DataContext> _dbContextFactory
+@inject BoardService _boardService
 
 <Modal @ref="Modal" Title="New column" OnSubmitAttempted="OnSubmitAttempted">
     <EditForm class="form" EditContext="_editContext">
@@ -77,16 +77,14 @@
         if (!_editContext.Validate())
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var board = await db.Boards.Include(x => x.Columns).FirstOrDefaultAsync(x => x.Id.Equals(_boardId));
-
-        if (board is not null)
-        {
-            _column.Index = board.Columns.GetNextIndex();
-
-            board.Columns.Add(_column);
-            await db.SaveChangesAsync();
-        }
+        await _boardService.CreateColumnAsync(
+            new Actor(_user.Id),
+            _boardId,
+            _column.Name,
+            _column.MaxCards,
+            _column.Finished,
+            _column.NewCardPlacement
+        );
 
         await Modal.Close();
         await OnSubmit.InvokeAsync();

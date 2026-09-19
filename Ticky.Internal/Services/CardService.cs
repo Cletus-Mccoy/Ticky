@@ -128,7 +128,13 @@ public class CardService
         return ServiceResult<Card>.Ok(movedCard);
     }
 
-    public async Task<ServiceResult<Card>> UpdateAsync(Actor actor, int cardId, string? name = null, string? description = null)
+    public async Task<ServiceResult<Card>> UpdateAsync(
+        Actor actor,
+        int cardId,
+        string? name = null,
+        string? description = null,
+        CardPriority? priority = null
+    )
     {
         if (name is not null)
         {
@@ -164,6 +170,18 @@ public class CardService
             {
                 ActivityType = ActivityType.DescriptionChanged,
                 Text = "<b>changed</b> the description",
+                UserId = actor.UserId,
+                CardId = card.Id,
+            });
+        }
+
+        if (priority is not null && priority != card.Priority)
+        {
+            card.Priority = priority.Value;
+            db.Activities.Add(new Activity
+            {
+                ActivityType = ActivityType.PriorityChanged,
+                Text = $"<b>changed</b> the priority to <b>{priority}</b>",
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -207,13 +225,237 @@ public class CardService
         return ServiceResult<Comment>.Ok(comment);
     }
 
+    /// <summary>
+    /// Deletes a card; comments, activity, links and labels go with it. Returns the id of the card's board.
+    /// </summary>
+    public async Task<ServiceResult<int>> DeleteAsync(Actor actor, int cardId)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+
+        var card = await db.AccessibleCards(actor)
+            .Include(x => x.Column)
+            .FirstOrDefaultAsync(x => x.Id == cardId);
+
+        if (card is null)
+            return ServiceResult<int>.Fail(ServiceError.NotFound, $"Card {cardId} not found.");
+
+        await db.Cards.Where(x => x.Id == cardId).ExecuteDeleteAsync();
+
+        var remaining = await db.Cards.Where(x => x.ColumnId == card.ColumnId).ToListAsync();
+        remaining.FixIndices();
+        await db.SaveChangesAsync();
+
+        return ServiceResult<int>.Ok(card.Column.BoardId);
+    }
+
+    public Task<ServiceResult<Card>> AddLabelAsync(Actor actor, int cardId, int labelId) =>
+        SetLabelAsync(actor, cardId, labelId, add: true);
+
+    public Task<ServiceResult<Card>> RemoveLabelAsync(Actor actor, int cardId, int labelId) =>
+        SetLabelAsync(actor, cardId, labelId, add: false);
+
+    /// <summary>
+    /// Adds or removes a label from the card's board. Idempotent: no activity is recorded if nothing changes.
+    /// </summary>
+    private async Task<ServiceResult<Card>> SetLabelAsync(Actor actor, int cardId, int labelId, bool add)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+
+        var card = await db.AccessibleCards(actor)
+            .Include(x => x.Column)
+            .Include(x => x.Labels)
+            .FirstOrDefaultAsync(x => x.Id == cardId);
+
+        if (card is null)
+            return ServiceResult<Card>.Fail(ServiceError.NotFound, $"Card {cardId} not found.");
+
+        var label = await db.Labels.FirstOrDefaultAsync(x => x.Id == labelId && x.BoardId == card.Column.BoardId);
+
+        if (label is null)
+            return ServiceResult<Card>.Fail(ServiceError.NotFound, $"Label {labelId} not found on this card's board.");
+
+        var hasLabel = card.Labels.Any(x => x.Id == labelId);
+
+        if (add && !hasLabel)
+        {
+            card.Labels.Add(label);
+            db.Activities.Add(new Activity
+            {
+                ActivityType = ActivityType.LabelAdded,
+                Text = $"<b>added</b> label <b>{label.Name}</b>",
+                UserId = actor.UserId,
+                CardId = card.Id,
+            });
+        }
+        else if (!add && hasLabel)
+        {
+            card.Labels.RemoveAll(x => x.Id == labelId);
+            db.Activities.Add(new Activity
+            {
+                ActivityType = ActivityType.LabelRemoved,
+                Text = $"<b>removed</b> label <b>{label.Name}</b>",
+                UserId = actor.UserId,
+                CardId = card.Id,
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        return ServiceResult<Card>.Ok(card);
+    }
+
+    public static IEnumerable<string> LinkCategories =>
+        Constants.LINK_TYPE_PAIRS.Keys.Concat(Constants.LINK_TYPE_PAIRS.Values).Distinct();
+
+    private static string OppositeCategory(string category) =>
+        Constants.LINK_TYPE_PAIRS.TryGetValue(category, out var opposite)
+            ? opposite
+            : Constants.LINK_TYPE_PAIRS.First(x => x.Value == category).Key;
+
+    /// <summary>
+    /// Links two cards. Like the UI, this stores a link on each card with opposite categories
+    /// (e.g. "blocks" / "is blocked by") and records the activity on both.
+    /// </summary>
+    public async Task<ServiceResult<CardLink>> AddLinkAsync(Actor actor, int cardId, int targetCardId, string category)
+    {
+        category = category.Trim();
+
+        if (!LinkCategories.Contains(category))
+        {
+            return ServiceResult<CardLink>.Fail(
+                ServiceError.Invalid,
+                $"Unknown link category '{category}'. Use one of: {string.Join(", ", LinkCategories)}."
+            );
+        }
+
+        if (cardId == targetCardId)
+            return ServiceResult<CardLink>.Fail(ServiceError.Invalid, "A card cannot be linked to itself.");
+
+        using var db = _dbContextFactory.CreateDbContext();
+
+        var cards = await db.AccessibleCards(actor)
+            .Include(x => x.Column)
+                .ThenInclude(x => x.Board)
+            .Where(x => x.Id == cardId || x.Id == targetCardId)
+            .ToListAsync();
+
+        var card = cards.FirstOrDefault(x => x.Id == cardId);
+        var target = cards.FirstOrDefault(x => x.Id == targetCardId);
+
+        if (card is null)
+            return ServiceResult<CardLink>.Fail(ServiceError.NotFound, $"Card {cardId} not found.");
+
+        if (target is null)
+            return ServiceResult<CardLink>.Fail(ServiceError.NotFound, $"Target card {targetCardId} not found.");
+
+        if (await db.CardLinks.AnyAsync(x => x.CardOneId == cardId && x.CardTwoId == targetCardId))
+            return ServiceResult<CardLink>.Fail(ServiceError.Invalid, "This card is already linked to the target card.");
+
+        var oppositeCategory = OppositeCategory(category);
+
+        var link = new CardLink { CardOneId = card.Id, CardTwoId = target.Id, Category = category };
+        db.CardLinks.Add(link);
+        db.CardLinks.Add(new CardLink { CardOneId = target.Id, CardTwoId = card.Id, Category = oppositeCategory });
+
+        db.Activities.Add(new Activity
+        {
+            ActivityType = ActivityType.LinkAdded,
+            Text = $"<b>added</b> a linked issue <b>{target.Column.Board.Code}-{target.Number}</b> with <b>{category}</b> relationship",
+            UserId = actor.UserId,
+            CardId = card.Id,
+        });
+        db.Activities.Add(new Activity
+        {
+            ActivityType = ActivityType.LinkAdded,
+            Text = $"<b>added</b> a linked issue <b>{card.Column.Board.Code}-{card.Number}</b> with <b>{oppositeCategory}</b> relationship",
+            UserId = actor.UserId,
+            CardId = target.Id,
+        });
+
+        await db.SaveChangesAsync();
+
+        return ServiceResult<CardLink>.Ok(link);
+    }
+
+    /// <summary>
+    /// Removes the link between two cards in both directions. Returns the number of link rows removed.
+    /// </summary>
+    public async Task<ServiceResult<int>> RemoveLinkAsync(Actor actor, int cardId, int targetCardId)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+
+        if (!await db.AccessibleCards(actor).AnyAsync(x => x.Id == cardId))
+            return ServiceResult<int>.Fail(ServiceError.NotFound, $"Card {cardId} not found.");
+
+        var links = await db.CardLinks
+            .Include(x => x.CardTwo)
+                .ThenInclude(x => x.Column)
+                    .ThenInclude(x => x.Board)
+            .Where(x =>
+                (x.CardOneId == cardId && x.CardTwoId == targetCardId)
+                || (x.CardOneId == targetCardId && x.CardTwoId == cardId)
+            )
+            .ToListAsync();
+
+        if (!links.Any(x => x.CardOneId == cardId))
+            return ServiceResult<int>.Fail(ServiceError.NotFound, $"Card {cardId} is not linked to card {targetCardId}.");
+
+        foreach (var link in links)
+        {
+            db.CardLinks.Remove(link);
+            db.Activities.Add(new Activity
+            {
+                ActivityType = ActivityType.LinkRemoved,
+                Text = $"<b>deleted</b> a linked issue <b>{link.CardTwo.Column.Board.Code}-{link.CardTwo.Number}</b> with <b>{link.Category}</b> relationship",
+                UserId = actor.UserId,
+                CardId = link.CardOneId,
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        return ServiceResult<int>.Ok(links.Count);
+    }
+
+    /// <summary>
+    /// Links from this card, limited to target cards the actor can access. Null if the card is not accessible.
+    /// </summary>
+    public async Task<List<CardLinkDto>?> GetLinksAsync(Actor actor, int cardId)
+    {
+        using var db = _dbContextFactory.CreateDbContext();
+
+        if (!await db.AccessibleCards(actor).AnyAsync(x => x.Id == cardId))
+            return null;
+
+        return await db.CardLinks
+            .Where(x => x.CardOneId == cardId && db.AccessibleCards(actor).Any(c => c.Id == x.CardTwoId))
+            .OrderBy(x => x.CreatedAt)
+            .Select(x => new CardLinkDto(
+                x.Id,
+                x.Category,
+                x.CardTwoId,
+                x.CardTwo.Column.Board.Code + "-" + x.CardTwo.Number,
+                x.CardTwo.Name,
+                x.CardTwo.Column.Name
+            ))
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Resolves "42" (card id) or "TCK-42" (card key) to an accessible card.
+    /// </summary>
+    public async Task<CardDto?> ResolveAsync(Actor actor, string reference) =>
+        int.TryParse(reference.Trim(), out var id)
+            ? await GetAsync(actor, id)
+            : await GetByKeyAsync(actor, reference.Trim());
+
     public async Task<CardDto?> GetAsync(Actor actor, int cardId)
     {
         using var db = _dbContextFactory.CreateDbContext();
 
         return await db.AccessibleCards(actor)
             .Where(x => x.Id == cardId)
-            .Select(ToDto)
+            .Select(ToDto(db, actor))
             .FirstOrDefaultAsync();
     }
 
@@ -233,27 +475,40 @@ public class CardService
 
         return await db.AccessibleCards(actor)
             .Where(x => x.Number == number && x.Column.Board.Code == code)
-            .Select(ToDto)
+            .Select(ToDto(db, actor))
             .FirstOrDefaultAsync();
     }
 
-    private static readonly System.Linq.Expressions.Expression<Func<Card, CardDto>> ToDto = x => new CardDto(
-        x.Id,
-        x.Column.Board.Code + "-" + x.Number,
-        x.Column.BoardId,
-        x.Name,
-        x.Description,
-        x.ColumnId,
-        x.Column.Name,
-        x.Column.Finished,
-        x.Index,
-        x.Priority,
-        x.Deadline,
-        x.Flagged,
-        x.CreatedBy.DisplayName,
-        x.CreatedAt,
-        x.Assignees.Select(a => a.DisplayName).ToList(),
-        x.Labels.Select(l => l.Name).ToList(),
-        x.Comments.OrderBy(c => c.CreatedAt).Select(c => new CommentDto(c.Id, c.CreatedBy.DisplayName, c.Text, c.CreatedAt)).ToList()
-    );
+    private static System.Linq.Expressions.Expression<Func<Card, CardDto>> ToDto(DataContext db, Actor actor) =>
+        x => new CardDto(
+            x.Id,
+            x.Column.Board.Code + "-" + x.Number,
+            x.Column.BoardId,
+            x.Name,
+            x.Description,
+            x.ColumnId,
+            x.Column.Name,
+            x.Column.Finished,
+            x.Index,
+            x.Priority,
+            x.Deadline,
+            x.Flagged,
+            x.CreatedBy.DisplayName,
+            x.CreatedAt,
+            x.Assignees.Select(a => a.DisplayName).ToList(),
+            x.Labels.Select(l => l.Name).ToList(),
+            x.LinkedIssuesOne
+                .Where(l => db.AccessibleCards(actor).Any(c => c.Id == l.CardTwoId))
+                .OrderBy(l => l.CreatedAt)
+                .Select(l => new CardLinkDto(
+                    l.Id,
+                    l.Category,
+                    l.CardTwoId,
+                    l.CardTwo.Column.Board.Code + "-" + l.CardTwo.Number,
+                    l.CardTwo.Name,
+                    l.CardTwo.Column.Name
+                ))
+                .ToList(),
+            x.Comments.OrderBy(c => c.CreatedAt).Select(c => new CommentDto(c.Id, c.CreatedBy.DisplayName, c.Text, c.CreatedAt)).ToList()
+        );
 }

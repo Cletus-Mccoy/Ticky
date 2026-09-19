@@ -1,4 +1,5 @@
 @inject IDbContextFactory<DataContext> _dbContextFactory
+@inject CardService _cardService
 
 <ActionModal @ref=_modalRef Title="Priority">
     @if(_card is null) {
@@ -57,25 +58,12 @@
         if(_card is null)
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
-        var card = await db.Cards
-            .Include(x => x.Activities)
-            .FirstOrDefaultAsync(x => x.Id.Equals(_card.Id));
+        var result = await _cardService.UpdateAsync(new Actor(_user.Id), _card.Id, priority: priority);
 
-        if(card is null || card.Priority.Equals(priority))
+        if (!result.Succeeded)
             return;
 
-        card.Priority = priority;
-        card.Activities.Add(new Activity
-            {
-                ActivityType = ActivityType.PriorityChanged,
-                Text = $"<b>changed</b> the priority to <b>{priority}</b>",
-                UserId = _user.Id,
-                CardId = card.Id,
-            });
-        await db.SaveChangesAsync();
-
-        _card = card;
+        _card = result.Value!;
         await UpdateCard.InvokeAsync();
     }
 }

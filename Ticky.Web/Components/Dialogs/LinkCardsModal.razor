@@ -1,4 +1,5 @@
 @inject IDbContextFactory<DataContext> _dbContextFactory
+@inject CardService _cardService
 @inject IJSRuntime _js
 
 <ActionModal @ref=_modalRef Title="Link card">
@@ -62,7 +63,7 @@
         _modalRef?.Open(elementId);
     }
 
-    public async Task OnSubmitAttempted() 
+    public async Task OnSubmitAttempted()
     {
         if(_card is null || _linkingCard is null)
             return;
@@ -72,79 +73,14 @@
         if (!_editContext.Validate())
             return;
 
-        using var db = _dbContextFactory.CreateDbContext();
+        var result = await _cardService.AddLinkAsync(new Actor(_user.Id), _card.Id, _linkingCard.Id, _linkCardsModel.Text);
 
-        var card = await db.Cards
-            .Include(x => x.LinkedIssuesOne)
-            .Include(x => x.LinkedIssuesTwo)
-            .Include(x => x.Activities)
-            .Include(x => x.Column)
-                .ThenInclude(x => x.Board)
-            .FirstOrDefaultAsync(x => x.Id.Equals(_card.Id));
-
-        if(card is null)
-            return;
-
-        var targetCard = await db.Cards
-            .Include(x => x.LinkedIssuesOne)
-            .Include(x => x.LinkedIssuesTwo)
-            .Include(x => x.Activities)
-            .Include(x => x.Column)
-                .ThenInclude(x => x.Board)
-            .FirstOrDefaultAsync(x => x.Id == _linkingCard.Id);
-
-        if (targetCard is null) 
+        if (!result.Succeeded)
         {
-            _cardError = "Target card does not exist anymore.";
+            _cardError = result.Message;
             return;
         }
 
-        if(targetCard.Id.Equals(card.Id))
-        {
-            _cardError = "You cannot link this card to itself.";
-            return;
-        }
-
-        if(card.LinkedIssuesOne.Any(x => x.CardTwoId.Equals(targetCard.Id)))
-        {
-            _cardError = "This card is already linked to the target card.";
-            return;
-        }
-
-        card.LinkedIssuesOne.Add(new CardLink
-        {
-            CardOneId = card.Id,
-            CardTwoId = targetCard.Id,
-            Category = _linkCardsModel.Text
-        });
-
-        var oppositeCategory = Constants.LINK_TYPE_PAIRS.ContainsKey(_linkCardsModel.Text) ? Constants.LINK_TYPE_PAIRS[_linkCardsModel.Text] : Constants.LINK_TYPE_PAIRS.First(x => x.Value.Equals(_linkCardsModel.Text)).Key;
-
-        targetCard.LinkedIssuesOne.Add(new CardLink
-            {
-                CardOneId = targetCard.Id,
-                CardTwoId = card.Id,
-                Category = oppositeCategory
-            });
-
-        card.Activities.Add(new Activity
-            {
-                ActivityType = ActivityType.LinkAdded,
-                Text = $"<b>added</b> a linked issue <b>{targetCard.Column.Board.Code}-{targetCard.Number}</b> with <b>{_linkCardsModel.Text}</b> relationship",
-                UserId = _user.Id,
-                CardId = card.Id,
-            });
-        targetCard.Activities.Add(new Activity
-            {
-                ActivityType = ActivityType.LinkAdded,
-                Text = $"<b>added</b> a linked issue <b>{card.Column.Board.Code}-{card.Number}</b> with <b>{oppositeCategory}</b> relationship",
-                UserId = _user.Id,
-                CardId = card.Id,
-            });
-
-        await db.SaveChangesAsync();
-
-        _card = card;
         StateHasChanged();
         await UpdateCard.InvokeAsync();
         _modalRef?.Close();

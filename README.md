@@ -213,14 +213,21 @@ Scripts and AI agents can work with Ticky through a REST API and a built-in [MCP
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/boards` | Boards you can access |
-| `GET` | `/api/boards/{id}` | Columns and cards of a board |
+| `GET` | `/api/boards/{id}` | Columns, labels and cards of a board |
 | `GET` | `/api/boards/{id}/activity?type=CardMoved&limit=50&before=...` | Activity feed, newest first |
 | `GET` | `/api/boards/{id}/stats` | Card counts per column and the burndown series |
-| `GET` | `/api/cards/{id}` or `/api/cards/{KEY-1}` | A card with its comments |
+| `GET` | `/api/boards/{id}/labels` | Labels defined on a board |
+| `POST` | `/api/boards/{id}/columns` | Add a column (board admins): `{ "name": "...", "maxCards": 0, "finished": false, "newCardPlacement": "Bottom" }` |
+| `GET` | `/api/cards/{id}` or `/api/cards/{KEY-1}` | A card with its labels, links and comments |
 | `POST` | `/api/cards` | Create a card: `{ "columnId": 1, "name": "...", "description": "..." }` |
-| `PATCH` | `/api/cards/{id}` | Change title and/or description |
+| `PATCH` | `/api/cards/{id}` | Change title, description and/or priority (`Normal`, `Medium`, `High`, `Critical`) |
+| `DELETE` | `/api/cards/{id}` | Delete a card |
 | `POST` | `/api/cards/{id}/move` | Move a card: `{ "columnId": 3, "index": 0 }` |
 | `POST` | `/api/cards/{id}/comments` | Comment: `{ "text": "..." }` |
+| `PUT` / `DELETE` | `/api/cards/{id}/labels/{labelId}` | Add or remove a label |
+| `GET` | `/api/cards/{id}/links` | Linked cards |
+| `POST` | `/api/cards/{id}/links` | Link cards: `{ "target": "KEY-2", "category": "blocks" }` |
+| `DELETE` | `/api/cards/{id}/links/{target}` | Unlink (target by id or key) |
 
 ```bash
 curl -H "Authorization: Bearer $TICKY_TOKEN" https://ticky.example.com/api/boards
@@ -228,7 +235,7 @@ curl -H "Authorization: Bearer $TICKY_TOKEN" https://ticky.example.com/api/board
 
 **MCP** (`/mcp`, streamable HTTP)
 
-Tools: `list_boards`, `get_board`, `get_card`, `create_card`, `update_card`, `move_card`, `add_comment`, `board_activity`, `board_stats`. Boards can be referred to by code, cards by key (e.g. `TCK-42`) and columns by name. For example, with Claude Code:
+Tools: `list_boards`, `get_board`, `get_card`, `create_card`, `update_card`, `move_card`, `delete_card`, `add_comment`, `link_cards`, `unlink_cards`, `list_labels`, `add_label`, `remove_label`, `create_column`, `board_activity`, `board_stats`. Boards can be referred to by code, cards by key (e.g. `TCK-42`), and columns and labels by name. For example, with Claude Code:
 
 ```bash
 claude mcp add --transport http ticky https://ticky.example.com/mcp --header "Authorization: Bearer $TICKY_TOKEN"
