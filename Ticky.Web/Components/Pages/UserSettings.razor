@@ -18,6 +18,7 @@
         <div data-active='@(_tab == 1 ? "true" : "false")' class="settings-menu-item @(_tab == 1 ? "selected" : "")" @onclick="() => GoToTab(1)">General</div>
         <div data-active='@(_tab == 2 ? "true" : "false")' class="settings-menu-item @(_tab == 2 ? "selected" : "")" @onclick="() => GoToTab(2)">Avatar</div>
         <div data-active='@(_tab == 3 ? "true" : "false")' class="settings-menu-item @(_tab == 3 ? "selected" : "")" @onclick="() => GoToTab(3)">Credentials</div>
+        <div data-active='@(_tab == 4 ? "true" : "false")' class="settings-menu-item @(_tab == 4 ? "selected" : "")" @onclick="() => GoToTab(4)">API tokens</div>
     </section>
 
     @if (_user is null)
@@ -216,6 +217,10 @@
             <button class="btn btn-purple max-w-sm" type="submit" disabled="@_isSaving">Save and continue</button>
         </EditForm>
     }
+    else if (_tab == 4)
+    {
+        <ApiTokensSettings User="_user" />
+    }
     else if (_tab == 3)
     {
         <div class="setting-description">
@@ -374,7 +379,7 @@
         _appliedTab = Tab;
 
         if (Tab.HasValue)
-            _tab = Math.Clamp(Tab.Value, 1, 3);
+            _tab = Math.Clamp(Tab.Value, 1, 4);
     }
 
     private void GoToTab(int tabNumber)
@@ -385,7 +390,7 @@
             return;
         }
 
-        _tab = Math.Clamp(tabNumber, 1, 3);
+        _tab = Math.Clamp(tabNumber, 1, 4);
     }
 
     private void ResetNameForm(string displayName)

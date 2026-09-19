@@ -1,6 +1,8 @@
+using System.Text.Json.Serialization;
 using Devity.Mailing;
 using Devity.NETCore.MailKit.Infrastructure.Internal;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.DataProtection.AuthenticatedEncryption;
@@ -125,6 +127,8 @@ builder.Services.AddScoped<UserAccountService>();
 builder.Services.AddScoped<CardNumberingService>();
 builder.Services.AddScoped<CardService>();
 builder.Services.AddScoped<BoardService>();
+builder.Services.AddScoped<ApiTokenService>();
+builder.Services.AddScoped<BoardNotifier>();
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<TrelloImportService>();
 builder.Services.AddSingleton<InformationService>();
@@ -150,15 +154,29 @@ builder
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 
+builder
+    .Services.AddAuthentication()
+    .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(ApiTokenAuthenticationHandler.SCHEME, null);
+
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy(
+        ApiTokenAuthenticationHandler.POLICY,
+        policy => policy
+            .AddAuthenticationSchemes(ApiTokenAuthenticationHandler.SCHEME)
+            .RequireAuthenticatedUser()
+            .Build()
+    );
+
     options.AddPolicy(
         Constants.Policies.RequireAdmin,
         policy => policy.RequireClaim(ClaimTypes.Role, Constants.Roles.Admin).Build()
     );
 });
 
-builder.Services.AddControllers();
+builder
+    .Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 #if !DEBUG
 // NOTE: In production, the application is expected to run behind a reverse proxy (e.g., Nginx, Traefik) that terminates HTTPS.

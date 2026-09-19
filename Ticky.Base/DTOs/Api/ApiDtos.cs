@@ -49,3 +49,11 @@ public record ColumnStatsDto(int Id, string Name, bool Finished, int Cards);
 public record BurndownPointDto(DateOnly Date, int Open);
 
 public record BoardStatsDto(int BoardId, int Total, int Done, int Open, List<ColumnStatsDto> Columns, List<BurndownPointDto> Burndown);
+
+public record CreateCardRequest([property: Required] int? ColumnId, [property: Required] string? Name, string? Description);
+
+public record UpdateCardRequest(string? Name, string? Description);
+
+public record MoveCardRequest([property: Required] int? ColumnId, int? Index, int? BeforeCardId);
+
+public record AddCommentRequest([property: Required] string? Text);

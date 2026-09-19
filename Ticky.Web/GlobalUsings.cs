@@ -24,3 +24,4 @@ global using Ticky.Internal.Services.Hosted;
 global using Ticky.Web.Components;
 global using Ticky.Web.Hubs;
 global using Ticky.Web.Pages.Auth;
+global using Ticky.Web.Api;

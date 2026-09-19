@@ -1,0 +1,146 @@
+@using Ticky.Base.DTOs.Api
+@inject ApiTokenService _apiTokenService
+@inject BoardService _boardService
+@inject IJSRuntime _js
+@inject NavigationManager _navigationManager
+
+<div class="flex flex-col py-5">
+    <label class="font-bold">API tokens</label>
+    <label class="text-sm opacity-70">
+        Tokens let scripts and agents use the REST API (<code>@_baseUri/api</code>) and the MCP endpoint (<code>@_baseUri/mcp</code>)
+        as you. Send them as <code>Authorization: Bearer &lt;token&gt;</code>. A token limited to a board can only see and change that board.
+    </label>
+</div>
+
+@if (_createdToken is not null)
+{
+    <div class="flex flex-col gap-2 rounded-lg border border-primary p-4 my-4 text-sm">
+        <label class="font-bold">Copy your new token now. It will not be shown again.</label>
+        <div class="flex flex-row items-center gap-2">
+            <code class="grow break-all rounded bg-search-bar p-2">@_createdToken</code>
+            <button class="px-4 py-2" @onclick="CopyToken">Copy</button>
+        </div>
+    </div>
+}
+
+<div class="settings-item">
+    <div class="flex flex-col gap-3 w-full py-2">
+        <div class="flex flex-row flex-wrap gap-3 items-end">
+            <div class="form-group grow">
+                <label class="text-sm font-bold opacity-90" for="token-name">Name</label>
+                <input id="token-name" class="form-control" placeholder="e.g. homelab agents" maxlength="100" @bind="_name" />
+            </div>
+            <div class="form-group">
+                <label class="text-sm font-bold opacity-90" for="token-scope">Access</label>
+                <select id="token-scope" class="form-control" @bind="_boardId">
+                    <option value="0">All my boards</option>
+                    @foreach (var board in _boards)
+                    {
+                        <option value="@board.Id">Only @board.Code - @board.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="text-sm font-bold opacity-90" for="token-expiry">Expires</label>
+                <select id="token-expiry" class="form-control" @bind="_expiryDays">
+                    <option value="0">Never</option>
+                    <option value="30">In 30 days</option>
+                    <option value="90">In 90 days</option>
+                    <option value="365">In a year</option>
+                </select>
+            </div>
+            <button class="px-4 py-2" @onclick="CreateToken">Create token</button>
+        </div>
+        @if (_error is not null)
+        {
+            <label class="text-sm text-red-500">@_error</label>
+        }
+    </div>
+</div>
+
+@if (_tokens.Count == 0)
+{
+    <div class="py-5 text-sm opacity-60">You have no API tokens.</div>
+}
+else
+{
+    @foreach (var token in _tokens)
+    {
+        var inactive = token.RevokedAt is not null || token.ExpiresAt <= DateTime.Now;
+
+        <div class="settings-item @(inactive ? "opacity-50" : string.Empty)">
+            <div class="flex flex-col text-sm">
+                <label class="font-bold opacity-90">@token.Name <code class="ml-2 font-normal opacity-70">@(token.Prefix)…</code></label>
+                <label class="opacity-70">
+                    @(token.Board is null ? "All boards" : $"Only {token.Board.Code}")
+                    · created @token.CreatedAt.ToElapsedString()
+                    · @(token.LastUsedAt is null ? "never used" : $"last used {token.LastUsedAt.Value.ToElapsedString()}")
+                    @if (token.RevokedAt is not null)
+                    {
+                        <span> · revoked</span>
+                    }
+                    else if (token.ExpiresAt is not null)
+                    {
+                        <span> · @(token.ExpiresAt <= DateTime.Now ? "expired" : $"expires {token.ExpiresAt.Value.ToReadableStringWithTime()}")</span>
+                    }
+                </label>
+            </div>
+            @if (!inactive)
+            {
+                <button class="!bg-red-button hover:!bg-red-button-hover px-4 py-2" @onclick="() => RevokeToken(token.Id)">Revoke</button>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public required User User { get; set; }
+
+    private List<ApiToken> _tokens = [];
+    private List<BoardSummaryDto> _boards = [];
+    private string _name = string.Empty;
+    private int _boardId;
+    private int _expiryDays;
+    private string? _createdToken;
+    private string? _error;
+    private string _baseUri = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _baseUri = _navigationManager.BaseUri.TrimEnd('/');
+        _boards = await _boardService.ListAsync(new Actor(User.Id));
+        await LoadTokens();
+    }
+
+    private async Task LoadTokens() => _tokens = await _apiTokenService.ListAsync(User.Id);
+
+    private async Task CreateToken()
+    {
+        var result = await _apiTokenService.CreateAsync(
+            User.Id,
+            _name,
+            _boardId == 0 ? null : _boardId,
+            _expiryDays == 0 ? null : DateTime.Now.AddDays(_expiryDays)
+        );
+
+        if (!result.Succeeded)
+        {
+            _error = result.Message;
+            return;
+        }
+
+        _error = null;
+        _createdToken = result.Value.Plaintext;
+        _name = string.Empty;
+        await LoadTokens();
+    }
+
+    private async Task RevokeToken(int tokenId)
+    {
+        await _apiTokenService.RevokeAsync(User.Id, tokenId);
+        await LoadTokens();
+    }
+
+    private async Task CopyToken() => await _js.InvokeVoidAsync("copyText", _createdToken);
+}
