@@ -43,6 +43,8 @@ Ticky is packed with powerful features designed to make your task management sea
 - **Completion Confetti**: Feel the satisfaction of completing each task with a bunch of confetti, there to celebrate your success.
 - **Filtering**: Easily find and organize tasks based on various criteria.
 - **Trello import**: You can import your Trello boards, including the ability to map all the assigned members from your Trello board to Ticky users.
+- **Board activity & burndown**: See every change on a board in one filterable feed, and a burndown chart of open cards over time.
+- **REST API & MCP server**: Let scripts and AI agents read and update boards with personal API tokens, see [API & MCP](#-api--mcp).
 - ... and more!
 
 ## 📋 Prerequisites
@@ -198,6 +200,39 @@ If you have any questions, need help setting up, want to share your feedback or 
 - **Ticky.Base**: Core entities, models, and shared components.
 - **Ticky.Internal**: Data access, services, and business logic.
 - **Ticky.Web**: Blazor web application, UI components, and user interface.
+
+## 🔌 API & MCP
+
+Scripts and AI agents can work with Ticky through a REST API and a built-in [MCP](https://modelcontextprotocol.io) server. Both act as a real user, go through the same logic as the UI and show up in card activity like any other change. Open boards refresh live.
+
+1. Go to **Settings → API tokens** and create a token. It can be limited to a single board and given an expiry. Copy it, it is only shown once.
+2. Send it as a bearer token: `Authorization: Bearer tky_...`
+
+**REST** (`/api`)
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/boards` | Boards you can access |
+| `GET` | `/api/boards/{id}` | Columns and cards of a board |
+| `GET` | `/api/boards/{id}/activity?type=CardMoved&limit=50&before=...` | Activity feed, newest first |
+| `GET` | `/api/boards/{id}/stats` | Card counts per column and the burndown series |
+| `GET` | `/api/cards/{id}` or `/api/cards/{KEY-1}` | A card with its comments |
+| `POST` | `/api/cards` | Create a card: `{ "columnId": 1, "name": "...", "description": "..." }` |
+| `PATCH` | `/api/cards/{id}` | Change title and/or description |
+| `POST` | `/api/cards/{id}/move` | Move a card: `{ "columnId": 3, "index": 0 }` |
+| `POST` | `/api/cards/{id}/comments` | Comment: `{ "text": "..." }` |
+
+```bash
+curl -H "Authorization: Bearer $TICKY_TOKEN" https://ticky.example.com/api/boards
+```
+
+**MCP** (`/mcp`, streamable HTTP)
+
+Tools: `list_boards`, `get_board`, `get_card`, `create_card`, `update_card`, `move_card`, `add_comment`, `board_activity`, `board_stats`. Boards can be referred to by code, cards by key (e.g. `TCK-42`) and columns by name. For example, with Claude Code:
+
+```bash
+claude mcp add --transport http ticky https://ticky.example.com/mcp --header "Authorization: Bearer $TICKY_TOKEN"
+```
 
 ## 🔧 Configuration
 

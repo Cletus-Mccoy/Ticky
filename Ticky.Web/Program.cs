@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Devity.Mailing;
 using Devity.NETCore.MailKit.Infrastructure.Internal;
 using Microsoft.AspNetCore.Authentication;
@@ -171,6 +173,20 @@ builder.Services.AddAuthorization(options =>
     );
 });
 
+builder.Services.AddHttpContextAccessor();
+builder
+    .Services.AddMcpServer(options =>
+        options.ServerInfo = new() { Name = Constants.APP_NAME, Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0" }
+    )
+    .WithHttpTransport()
+    .WithTools<TickyMcpTools>(
+        new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+            Converters = { new JsonStringEnumConverter() },
+        }
+    );
+
 builder
     .Services.AddControllers()
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -211,6 +227,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapMcp("/mcp").RequireAuthorization(ApiTokenAuthenticationHandler.POLICY);
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapRazorPages();
 app.MapHub<UpdateHub>(Constants.Hubs.UPDATE_HUB);
