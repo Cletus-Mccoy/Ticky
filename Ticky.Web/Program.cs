@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Devity.Mailing;
 using Devity.NETCore.MailKit.Infrastructure.Internal;
 using Microsoft.AspNetCore.Antiforgery;
@@ -125,7 +127,7 @@ builder.Services.AddDevityMailing<EmailService>(mailKitOptions!);
 builder.Services.AddScoped<AvatarService>();
 builder.Services.AddScoped<UserAccountService>();
 builder.Services.AddScoped<CardNumberingService>();
-builder.Services.AddScoped<CardService>();
+builder.Services.AddScoped<ApiCardService>();
 builder.Services.AddScoped<BoardService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services.AddScoped<BoardNotifier>();
@@ -173,6 +175,20 @@ builder.Services.AddAuthorization(options =>
         policy => policy.RequireClaim(ClaimTypes.Role, Constants.Roles.Admin).Build()
     );
 });
+
+builder.Services.AddHttpContextAccessor();
+builder
+    .Services.AddMcpServer(options =>
+        options.ServerInfo = new() { Name = Constants.APP_NAME, Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0" }
+    )
+    .WithHttpTransport()
+    .WithTools<TickyMcpTools>(
+        new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+            Converters = { new JsonStringEnumConverter() },
+        }
+    );
 
 builder
     .Services.AddControllers()
@@ -272,6 +288,7 @@ app.UseAuthorization();
 app.MapControllers();
 // Serves build-time assets fingerprinted and pre-compressed, with long-lived caching.
 app.MapStaticAssets();
+app.MapMcp("/mcp").RequireAuthorization(ApiTokenAuthenticationHandler.POLICY);
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapRazorPages();
 app.MapHub<UpdateHub>(Constants.Hubs.UPDATE_HUB);

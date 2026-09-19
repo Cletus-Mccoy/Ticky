@@ -23,7 +23,7 @@ public class CardsController : ControllerBase
     /// <summary>
     /// Looks a card up by its key, e.g. GET api/cards/TCK-42.
     /// </summary>
-    [HttpGet(@"{key:regex(^[[A-Za-z]]+-\d+$)}")]
+    [HttpGet(@"{key:regex(^[[A-Za-z0-9]]+-\d+$)}")]
     public async Task<ActionResult<CardDto>> GetByKey(string key) =>
         await _cardService.GetByKeyAsync(User.ToActor(), key) is { } card ? card : NotFound();
 
