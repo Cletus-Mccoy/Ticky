@@ -21,6 +21,7 @@
             <div data-active='@(_tab == 1 ? "true" : "false")' class="settings-menu-item" @onclick="() => GoToTab(1)">General</div>
             <div data-active='@(_tab == 2 ? "true" : "false")' class="settings-menu-item" @onclick="() => GoToTab(2)">Avatar</div>
             <div data-active='@(_tab == 3 ? "true" : "false")' class="settings-menu-item" @onclick="() => GoToTab(3)">Credentials</div>
+            <div data-active='@(_tab == 4 ? "true" : "false")' class="settings-menu-item" @onclick="() => GoToTab(4)">API tokens</div>
         </section>
 
         <section class="flex w-full flex-col divide-y divide-tab-outline">
@@ -169,6 +170,10 @@
                     <button class="auth-button" type="submit">Save</button>
                 </EditForm>
             }
+            else if (_tab == 4)
+            {
+                <ApiTokensSettings User="_user" />
+            }
         </section>
     </section>
 </div>
@@ -230,7 +235,7 @@
             return;
         }
 
-        _tab = Math.Clamp(tabNumber, 1, 3);
+        _tab = Math.Clamp(tabNumber, 1, 4);
     }
 
     private async void OnSettingChanged(ChangeEventArgs e, Expression<Func<User, bool>> setter)

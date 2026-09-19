@@ -25,6 +25,7 @@ namespace Ticky.Internal.Data
         public DbSet<LastVisit> LastVisits { get; set; } = default!;
         public DbSet<CardLink> CardLinks { get; set; } = default!;
         public DbSet<Favorite> Favorites { get; set; } = default!;
+        public DbSet<ApiToken> ApiTokens { get; set; } = default!;
         public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = default!;
 
         public DataContext(DbContextOptions<DataContext> options)
@@ -151,6 +152,19 @@ namespace Ticky.Internal.Data
                 .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<Activity>().HasIndex(x => new { x.ActivityType, x.CreatedAt });
+
+            modelBuilder.Entity<ApiToken>(token =>
+            {
+                token.Property(x => x.Name).HasMaxLength(100);
+                token.Property(x => x.TokenHash).HasMaxLength(64);
+                token.Property(x => x.Prefix).HasMaxLength(16);
+                token.HasIndex(x => x.TokenHash).IsUnique();
+
+                token.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+
+                // Cascade rather than SetNull: nulling the board would widen a board-scoped token to every board
+                token.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            });
 
             modelBuilder
                 .Entity<Card>()
