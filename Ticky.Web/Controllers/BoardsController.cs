@@ -8,10 +8,12 @@ namespace Ticky.Web.Controllers;
 public class BoardsController : ControllerBase
 {
     private readonly BoardService _boardService;
+    private readonly BoardNotifier _boardNotifier;
 
-    public BoardsController(BoardService boardService)
+    public BoardsController(BoardService boardService, BoardNotifier boardNotifier)
     {
         _boardService = boardService;
+        _boardNotifier = boardNotifier;
     }
 
     [HttpGet]
@@ -31,6 +33,37 @@ public class BoardsController : ControllerBase
         await _boardService.GetActivityAsync(User.ToActor(), id, type, limit, before) is { } activity
             ? activity
             : NotFound();
+
+    [HttpGet("{id:int}/labels")]
+    public async Task<ActionResult<List<LabelDto>>> Labels(int id) =>
+        await _boardService.GetLabelsAsync(User.ToActor(), id) is { } labels ? labels : NotFound();
+
+    /// <summary>
+    /// Adds a column at the end of the board. Board admins only.
+    /// </summary>
+    [HttpPost("{id:int}/columns")]
+    public async Task<IActionResult> CreateColumn(int id, CreateColumnRequest request)
+    {
+        var result = await _boardService.CreateColumnAsync(
+            User.ToActor(),
+            id,
+            request.Name!,
+            request.MaxCards ?? 0,
+            request.Finished ?? false,
+            request.NewCardPlacement ?? CardPlacement.Bottom
+        );
+
+        if (!result.Succeeded)
+            return this.ToProblem(result);
+
+        await _boardNotifier.BoardChangedAsync(id);
+
+        var column = result.Value!;
+        return Created(
+            $"/api/boards/{id}",
+            new ColumnDto(column.Id, column.Name, column.Index, column.Finished, column.MaxCards, 0)
+        );
+    }
 
     [HttpGet("{id:int}/stats")]
     public async Task<ActionResult<BoardStatsDto>> Stats(int id) =>

@@ -3,6 +3,7 @@ namespace Ticky.Internal.Services;
 public enum ServiceError
 {
     NotFound,
+    Forbidden,
     Invalid,
     ColumnFull,
 }

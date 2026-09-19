@@ -35,13 +35,13 @@ public class TickyMcpTools
     public Task<List<BoardSummaryDto>> ListBoards() => _boardService.ListAsync(_actor);
 
     [McpServerTool(Name = "get_board", ReadOnly = true, Idempotent = true)]
-    [Description("Gets a board's columns (in order, with which ones count as finished) and all its cards.")]
+    [Description("Gets a board's columns (in order, with which ones count as finished), its labels and all its cards.")]
     public async Task<BoardDto> GetBoard([Description("Board id or code, e.g. 12 or TCK.")] string board) =>
         await _boardService.GetAsync(_actor, await ResolveBoardIdAsync(board))
         ?? throw new McpException($"Board '{board}' not found.");
 
     [McpServerTool(Name = "get_card", ReadOnly = true, Idempotent = true)]
-    [Description("Gets a card with its description, column, assignees, labels and comments.")]
+    [Description("Gets a card with its description, column, priority, assignees, labels, links and comments.")]
     public Task<CardDto> GetCard([Description("Card key like TCK-42, or numeric card id.")] string card) =>
         ResolveCardAsync(card);
 
@@ -62,16 +62,95 @@ public class TickyMcpTools
     }
 
     [McpServerTool(Name = "update_card", Idempotent = true)]
-    [Description("Changes a card's title and/or description. Omitted fields are left unchanged.")]
+    [Description("Changes a card's title, description and/or priority. Omitted fields are left unchanged.")]
     public async Task<CardDto> UpdateCard(
         [Description("Card key like TCK-42, or numeric card id.")] string card,
         [Description("New title.")] string? name = null,
-        [Description("New description (markdown). Replaces the existing description.")] string? description = null
+        [Description("New description (markdown). Replaces the existing description.")] string? description = null,
+        [Description("New priority: Normal, Medium, High or Critical.")] CardPriority? priority = null
     )
     {
         var cardDto = await ResolveCardAsync(card);
-        Unwrap(await _cardService.UpdateAsync(_actor, cardDto.Id, name, description));
+        Unwrap(await _cardService.UpdateAsync(_actor, cardDto.Id, name, description, priority));
         return await ChangedAsync(cardDto.Id);
+    }
+
+    [McpServerTool(Name = "delete_card", Destructive = true)]
+    [Description("Permanently deletes a card with its comments, history, links and labels. Cannot be undone.")]
+    public async Task<string> DeleteCard([Description("Card key like TCK-42, or numeric card id.")] string card)
+    {
+        var cardDto = await ResolveCardAsync(card);
+        var boardId = Unwrap(await _cardService.DeleteAsync(_actor, cardDto.Id));
+        await _boardNotifier.BoardChangedAsync(boardId);
+        return $"Deleted {cardDto.Key} ({cardDto.Name}).";
+    }
+
+    [McpServerTool(Name = "link_cards")]
+    [Description(
+        "Links two cards, like 'TCK-1 blocks TCK-2'. The opposite link is added to the other card automatically. "
+            + "Categories: blocks, is blocked by, tests, is tested by, relates to, repeats, is repeated by."
+    )]
+    public async Task<CardDto> LinkCards(
+        [Description("Card key or id the link starts from.")] string card,
+        [Description("How this card relates to the target, e.g. 'blocks' or 'relates to'.")] string category,
+        [Description("Target card key or id.")] string target
+    )
+    {
+        var cardDto = await ResolveCardAsync(card);
+        var targetDto = await ResolveCardAsync(target);
+        Unwrap(await _cardService.AddLinkAsync(_actor, cardDto.Id, targetDto.Id, category));
+        await _boardNotifier.BoardChangedAsync(targetDto.BoardId);
+        return await ChangedAsync(cardDto.Id);
+    }
+
+    [McpServerTool(Name = "unlink_cards", Idempotent = true)]
+    [Description("Removes the link between two cards, in both directions.")]
+    public async Task<CardDto> UnlinkCards(
+        [Description("Card key or id.")] string card,
+        [Description("Linked card key or id.")] string target
+    )
+    {
+        var cardDto = await ResolveCardAsync(card);
+        var targetDto = await ResolveCardAsync(target);
+        Unwrap(await _cardService.RemoveLinkAsync(_actor, cardDto.Id, targetDto.Id));
+        await _boardNotifier.BoardChangedAsync(targetDto.BoardId);
+        return await ChangedAsync(cardDto.Id);
+    }
+
+    [McpServerTool(Name = "list_labels", ReadOnly = true, Idempotent = true)]
+    [Description("Lists the labels defined on a board.")]
+    public async Task<List<LabelDto>> ListLabels([Description("Board id or code.")] string board) =>
+        await _boardService.GetLabelsAsync(_actor, await ResolveBoardIdAsync(board))
+        ?? throw new McpException($"Board '{board}' not found.");
+
+    [McpServerTool(Name = "add_label", Idempotent = true)]
+    [Description("Adds one of the board's labels to a card.")]
+    public Task<CardDto> AddLabel(
+        [Description("Card key or id.")] string card,
+        [Description("Label name (case-insensitive) or id.")] string label
+    ) => SetLabelAsync(card, label, add: true);
+
+    [McpServerTool(Name = "remove_label", Idempotent = true)]
+    [Description("Removes a label from a card.")]
+    public Task<CardDto> RemoveLabel(
+        [Description("Card key or id.")] string card,
+        [Description("Label name (case-insensitive) or id.")] string label
+    ) => SetLabelAsync(card, label, add: false);
+
+    [McpServerTool(Name = "create_column")]
+    [Description("Adds a column at the end of a board. Requires board admin rights.")]
+    public async Task<ColumnDto> CreateColumn(
+        [Description("Board id or code.")] string board,
+        [Description("Column name.")] string name,
+        [Description("Maximum number of cards, 0 for unlimited.")] int maxCards = 0,
+        [Description("Whether cards in this column count as finished (done).")] bool finished = false,
+        [Description("Where new cards go: Top or Bottom.")] CardPlacement newCardPlacement = CardPlacement.Bottom
+    )
+    {
+        var boardId = await ResolveBoardIdAsync(board);
+        var column = Unwrap(await _boardService.CreateColumnAsync(_actor, boardId, name, maxCards, finished, newCardPlacement));
+        await _boardNotifier.BoardChangedAsync(boardId);
+        return new ColumnDto(column.Id, column.Name, column.Index, column.Finished, column.MaxCards, 0);
     }
 
     [McpServerTool(Name = "move_card")]
@@ -118,6 +197,29 @@ public class TickyMcpTools
         await _boardService.GetStatsAsync(_actor, await ResolveBoardIdAsync(board))
         ?? throw new McpException($"Board '{board}' not found.");
 
+    private async Task<CardDto> SetLabelAsync(string card, string label, bool add)
+    {
+        var cardDto = await ResolveCardAsync(card);
+        var labels = await _boardService.GetLabelsAsync(_actor, cardDto.BoardId) ?? [];
+
+        var match = int.TryParse(label, out var labelId)
+            ? labels.FirstOrDefault(x => x.Id == labelId)
+            : labels.FirstOrDefault(x => x.Name.Equals(label.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (match is null)
+        {
+            throw new McpException(
+                $"Label '{label}' not found on this board. Labels: {(labels.Count == 0 ? "none" : string.Join(", ", labels.Select(x => x.Name)))}."
+            );
+        }
+
+        Unwrap(add
+            ? await _cardService.AddLabelAsync(_actor, cardDto.Id, match.Id)
+            : await _cardService.RemoveLabelAsync(_actor, cardDto.Id, match.Id));
+
+        return await ChangedAsync(cardDto.Id);
+    }
+
     private async Task<int> ResolveBoardIdAsync(string board)
     {
         if (int.TryParse(board, out var id))
@@ -129,14 +231,8 @@ public class TickyMcpTools
         return match?.Id ?? throw new McpException($"Board '{board}' not found. Use list_boards to see available boards.");
     }
 
-    private async Task<CardDto> ResolveCardAsync(string card)
-    {
-        var dto = int.TryParse(card, out var id)
-            ? await _cardService.GetAsync(_actor, id)
-            : await _cardService.GetByKeyAsync(_actor, card.Trim());
-
-        return dto ?? throw new McpException($"Card '{card}' not found.");
-    }
+    private async Task<CardDto> ResolveCardAsync(string card) =>
+        await _cardService.ResolveAsync(_actor, card) ?? throw new McpException($"Card '{card}' not found.");
 
     private static int ResolveColumnId(BoardDto board, string column)
     {
