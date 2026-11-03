@@ -8,12 +8,12 @@ namespace Ticky.Web.Controllers;
 public class AttachmentsController : ControllerBase
 {
     private readonly IDbContextFactory<DataContext> _dbContextFactory;
-    private readonly ApiCardService _cardService;
+    private readonly CardService _cardService;
     private readonly ILogger<AttachmentsController> _logger;
 
     public AttachmentsController(
         IDbContextFactory<DataContext> dbContextFactory,
-        ApiCardService cardService,
+        CardService cardService,
         ILogger<AttachmentsController> logger
     )
     {
