@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 namespace Ticky.Internal.Services;
 
 /// <summary>
@@ -157,24 +158,32 @@ public class BoardService
         if (before is not null)
             query = query.Where(x => x.CreatedAt < before);
 
-        return await query
+        var rows = await query
+            .Include(x => x.User)
+            .Include(x => x.Card.Column.Board)
             .OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id)
             .Take(Math.Clamp(limit, 1, MAX_ACTIVITY_LIMIT))
-            .Select(x => new ActivityDto(
-                x.Id,
-                x.CardId,
-                x.Card.Column.Board.Code + "-" + x.Card.Number,
-                x.Card.Name,
-                x.ActivityType,
-                x.Text,
-                x.User.DisplayName,
-                x.CreatedAt,
-                x.FromColumnName,
-                x.ToColumnName,
-                x.ToColumnFinished
-            ))
             .ToListAsync();
+
+        return rows.Select(x =>
+            {
+                var moved = x as CardMovedActivity;
+                return new ActivityDto(
+                    x.Id,
+                    x.CardId,
+                    x.Card.Column.Board.Code + "-" + x.Card.Number,
+                    x.Card.Name,
+                    x.ActivityType,
+                    Describe(x),
+                    x.User.DisplayName,
+                    x.CreatedAt,
+                    moved?.FromColumnName,
+                    moved?.ToColumnName,
+                    moved?.ToColumnFinished
+                );
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -194,23 +203,12 @@ public class BoardService
             .Select(x => new ColumnStatsDto(x.Id, x.Name, x.Finished, x.Cards.Count))
             .ToListAsync();
 
-        var cardCreatedAts = await db.Cards
-            .Where(x => x.Column.BoardId == boardId)
-            .Select(x => x.CreatedAt)
-            .ToListAsync();
-
-        var completionDates = await db.Activities
-            .Where(x =>
-                x.ActivityType == ActivityType.CardMoved
-                && x.ToColumnFinished == true
-                && x.Card.Column.BoardId == boardId
-            )
-            .GroupBy(x => x.CardId)
-            .Select(g => g.Min(x => x.CreatedAt))
-            .ToListAsync();
-
-        var burndown = BurndownHelper
-            .GetOpenPerDay(cardCreatedAts, completionDates, today ?? DateTime.Today)
+        var timelines = await BurndownHelper.LoadTimelinesAsync(db, boardId);
+        var burndown = (
+            timelines.Count == 0
+                ? []
+                : BurndownHelper.GetOpenPerDay(timelines, timelines.Min(x => x.CreatedAt), today ?? DateTime.Today)
+        )
             .Select(x => new BurndownPointDto(DateOnly.FromDateTime(x.Date), x.Open))
             .ToList();
 
@@ -219,4 +217,8 @@ public class BoardService
 
         return new BoardStatsDto(boardId, total, done, total - done, columns, burndown);
     }
+
+    /// <summary>Plain-text summary of an activity, from the shared formatter with its markup removed.</summary>
+    private static string Describe(Activity activity) =>
+        System.Net.WebUtility.HtmlDecode(Regex.Replace(activity.ToHtml(), "<[^>]*>", string.Empty));
 }

@@ -120,7 +120,16 @@ public class ApiCardService
         toColumn.Cards.Add(movedCard);
         toColumn.Cards.FixIndices();
 
-        db.Activities.Add(Activity.CardMoved(movedCard.Id, actor.UserId, fromColumn, toColumn));
+        db.Activities.Add(new CardMovedActivity
+        {
+            CardId = movedCard.Id,
+            UserId = actor.UserId,
+            FromColumnId = fromColumn.Id,
+            FromColumnName = fromColumn.Name,
+            ToColumnId = toColumn.Id,
+            ToColumnName = toColumn.Name,
+            ToColumnFinished = toColumn.Finished,
+        });
 
         await db.SaveChangesAsync();
 
@@ -153,11 +162,12 @@ public class ApiCardService
 
         if (name is not null && name != card.Name)
         {
+            var oldName = card.Name;
             card.Name = name;
-            db.Activities.Add(new Activity
+            db.Activities.Add(new TitleChangedActivity
             {
-                ActivityType = ActivityType.TitleChanged,
-                Text = "<b>changed</b> the title",
+                OldTitle = oldName,
+                NewTitle = name,
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -166,10 +176,8 @@ public class ApiCardService
         if (description is not null && description != card.Description)
         {
             card.Description = description;
-            db.Activities.Add(new Activity
+            db.Activities.Add(new DescriptionChangedActivity
             {
-                ActivityType = ActivityType.DescriptionChanged,
-                Text = "<b>changed</b> the description",
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -178,10 +186,9 @@ public class ApiCardService
         if (priority is not null && priority != card.Priority)
         {
             card.Priority = priority.Value;
-            db.Activities.Add(new Activity
+            db.Activities.Add(new PriorityChangedActivity
             {
-                ActivityType = ActivityType.PriorityChanged,
-                Text = $"<b>changed</b> the priority to <b>{priority}</b>",
+                Priority = priority.Value,
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -212,10 +219,8 @@ public class ApiCardService
         };
 
         db.Comments.Add(comment);
-        db.Activities.Add(new Activity
+        db.Activities.Add(new CommentPostedActivity
         {
-            ActivityType = ActivityType.CommentPosted,
-            Text = "<b>posted</b> a comment",
             UserId = actor.UserId,
             CardId = card.Id,
         });
@@ -279,10 +284,10 @@ public class ApiCardService
         if (add && !hasLabel)
         {
             card.Labels.Add(label);
-            db.Activities.Add(new Activity
+            db.Activities.Add(new LabelAddedActivity
             {
-                ActivityType = ActivityType.LabelAdded,
-                Text = $"<b>added</b> label <b>{label.Name}</b>",
+                LabelId = label.Id,
+                LabelName = label.Name,
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -290,10 +295,10 @@ public class ApiCardService
         else if (!add && hasLabel)
         {
             card.Labels.RemoveAll(x => x.Id == labelId);
-            db.Activities.Add(new Activity
+            db.Activities.Add(new LabelRemovedActivity
             {
-                ActivityType = ActivityType.LabelRemoved,
-                Text = $"<b>removed</b> label <b>{label.Name}</b>",
+                LabelId = label.Id,
+                LabelName = label.Name,
                 UserId = actor.UserId,
                 CardId = card.Id,
             });
@@ -357,19 +362,21 @@ public class ApiCardService
         db.CardLinks.Add(link);
         db.CardLinks.Add(new CardLink { CardOneId = target.Id, CardTwoId = card.Id, Category = oppositeCategory });
 
-        db.Activities.Add(new Activity
+        db.Activities.Add(new LinkAddedActivity
         {
-            ActivityType = ActivityType.LinkAdded,
-            Text = $"<b>added</b> a linked issue <b>{target.Column.Board.Code}-{target.Number}</b> with <b>{category}</b> relationship",
             UserId = actor.UserId,
             CardId = card.Id,
+            RelatedCardId = target.Id,
+            RelatedCardCode = $"{target.Column.Board.Code}-{target.Number}",
+            Category = category,
         });
-        db.Activities.Add(new Activity
+        db.Activities.Add(new LinkAddedActivity
         {
-            ActivityType = ActivityType.LinkAdded,
-            Text = $"<b>added</b> a linked issue <b>{card.Column.Board.Code}-{card.Number}</b> with <b>{oppositeCategory}</b> relationship",
             UserId = actor.UserId,
             CardId = target.Id,
+            RelatedCardId = card.Id,
+            RelatedCardCode = $"{card.Column.Board.Code}-{card.Number}",
+            Category = oppositeCategory,
         });
 
         await db.SaveChangesAsync();
@@ -403,12 +410,13 @@ public class ApiCardService
         foreach (var link in links)
         {
             db.CardLinks.Remove(link);
-            db.Activities.Add(new Activity
+            db.Activities.Add(new LinkRemovedActivity
             {
-                ActivityType = ActivityType.LinkRemoved,
-                Text = $"<b>deleted</b> a linked issue <b>{link.CardTwo.Column.Board.Code}-{link.CardTwo.Number}</b> with <b>{link.Category}</b> relationship",
                 UserId = actor.UserId,
                 CardId = link.CardOneId,
+                RelatedCardId = link.CardTwoId,
+                RelatedCardCode = $"{link.CardTwo.Column.Board.Code}-{link.CardTwo.Number}",
+                Category = link.Category,
             });
         }
 

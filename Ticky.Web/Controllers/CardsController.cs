@@ -7,10 +7,10 @@ namespace Ticky.Web.Controllers;
 [ApiController]
 public class CardsController : ControllerBase
 {
-    private readonly CardService _cardService;
+    private readonly ApiCardService _cardService;
     private readonly BoardNotifier _boardNotifier;
 
-    public CardsController(CardService cardService, BoardNotifier boardNotifier)
+    public CardsController(ApiCardService cardService, BoardNotifier boardNotifier)
     {
         _cardService = cardService;
         _boardNotifier = boardNotifier;

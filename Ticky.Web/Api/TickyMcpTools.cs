@@ -12,13 +12,13 @@ namespace Ticky.Web.Api;
 [McpServerToolType]
 public class TickyMcpTools
 {
-    private readonly CardService _cardService;
+    private readonly ApiCardService _cardService;
     private readonly BoardService _boardService;
     private readonly BoardNotifier _boardNotifier;
     private readonly Actor _actor;
 
     public TickyMcpTools(
-        CardService cardService,
+        ApiCardService cardService,
         BoardService boardService,
         BoardNotifier boardNotifier,
         IHttpContextAccessor httpContextAccessor

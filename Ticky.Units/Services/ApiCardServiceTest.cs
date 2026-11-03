@@ -86,7 +86,7 @@ public class CardServiceTest
         var result = await _service.MoveAsync(_member, a.Id, _seed.Done.Id);
 
         using var db = _db.CreateDbContext();
-        var activity = db.Activities.Single(x => x.ActivityType == ActivityType.CardMoved);
+        var activity = db.Activities.OfType<CardMovedActivity>().Single();
 
         Assert.Multiple(() =>
         {

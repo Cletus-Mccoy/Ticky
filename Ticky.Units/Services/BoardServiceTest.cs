@@ -4,7 +4,7 @@ public class BoardServiceTest
 {
     private SqliteDbFixture _db = null!;
     private SqliteDbFixture.Seed _seed = null!;
-    private CardService _cards = null!;
+    private ApiCardService _cards = null!;
     private BoardService _boards = null!;
     private Actor _member = null!;
 
@@ -13,7 +13,7 @@ public class BoardServiceTest
     {
         _db = new SqliteDbFixture();
         _seed = _db.SeedBoards();
-        _cards = new CardService(_db, new CardNumberingService(_db));
+        _cards = new ApiCardService(_db, new CardNumberingService(_db));
         _boards = new BoardService(_db);
         _member = new Actor(_seed.Member.Id);
     }

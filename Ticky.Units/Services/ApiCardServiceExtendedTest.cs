@@ -6,10 +6,10 @@ namespace Ticky.Units.Services;
 /// <summary>
 /// Priority, delete, labels and links: the operations added so API clients never need direct database access.
 /// </summary>
-public class CardServiceExtendedTest
+public class ApiCardServiceExtendedTest
 {
     private SqliteDbFixture _db = null!;
-    private CardService _service = null!;
+    private ApiCardService _service = null!;
     private SqliteDbFixture.Seed _seed = null!;
     private Actor _member = null!;
 
@@ -18,7 +18,7 @@ public class CardServiceExtendedTest
     {
         _db = new SqliteDbFixture();
         _seed = _db.SeedBoards();
-        _service = new CardService(_db, new CardNumberingService(_db));
+        _service = new ApiCardService(_db, new CardNumberingService(_db));
         _member = new Actor(_seed.Member.Id);
     }
 
@@ -59,7 +59,7 @@ public class CardServiceExtendedTest
         {
             Assert.That(dto!.Priority, Is.EqualTo(CardPriority.High));
             Assert.That(activity.ActivityType, Is.EqualTo(ActivityType.PriorityChanged));
-            Assert.That(activity.Text, Is.EqualTo("<b>changed</b> the priority to <b>High</b>"));
+            Assert.That(((PriorityChangedActivity)activity).Priority, Is.EqualTo(CardPriority.High));
         });
     }
 
@@ -146,8 +146,8 @@ public class CardServiceExtendedTest
             Assert.That(result.Succeeded, Is.True);
             Assert.That(links.Select(x => (x.CardOneId, x.CardTwoId, x.Category)),
                 Is.EqualTo(new[] { (a.Id, b.Id, "blocks"), (b.Id, a.Id, "is blocked by") }));
-            Assert.That(activities.Single(x => x.CardId == a.Id).Text, Does.Contain("TST-2</b> with <b>blocks"));
-            Assert.That(activities.Single(x => x.CardId == b.Id).Text, Does.Contain("TST-1</b> with <b>is blocked by"));
+            Assert.That(((LinkAddedActivity)activities.Single(x => x.CardId == a.Id)).RelatedCardCode, Is.EqualTo("TST-2"));
+            Assert.That(((LinkAddedActivity)activities.Single(x => x.CardId == b.Id)).RelatedCardCode, Is.EqualTo("TST-1"));
         });
     }
 
