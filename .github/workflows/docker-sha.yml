@@ -1,0 +1,44 @@
+name: Build and publish immutable sha-tagged Docker image
+
+# Fork-only. Pushes ghcr.io/<repo>:sha-<short commit> (never :latest or :unstable) from a feat/* branch,
+# so a deployment can pin the resulting multi-arch index digest.
+on:
+  push:
+    branches:
+      - "feat/api-mcp-on-redesign*"
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Set image name and tag
+        run: |
+          echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm
+          file: ./Dockerfile
+          push: true
+          tags: ghcr.io/${{ env.REPO_LOWER }}:sha-${{ env.SHORT_SHA }}
+
+      - name: Show digest
+        run: echo "digest ${{ steps.build.outputs.digest }}"
